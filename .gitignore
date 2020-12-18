@@ -127,4 +127,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-additional-packages/site-packages.zip
+**/site-packages.zip
