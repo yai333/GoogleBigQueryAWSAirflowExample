@@ -1,0 +1,47 @@
+{
+    "Version": "2012-10-17",
+    "Id": "AirflowPersonalizePolicy",
+    "Statement": [
+        {
+            "Sid": "PersonalizeAccessPolicy",
+            "Effect": "Allow",
+            "Action": [
+                "personalize:*"
+            ],
+            "Resource": [
+                "*"
+            ]
+        },
+        {
+            "Sid": "S3BucketAccessPolicy",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:PutBucketPolicy"
+            ],
+            "Resource": [
+                "arn:aws:s3:::airflow-demo-personalise",
+                "arn:aws:s3:::airflow-demo-personalise/*"
+            ]
+        },
+        {
+            "Sid": "IAMPolicy",
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateRole",
+                "iam:AttachRolePolicy"
+            ],
+            "Resource": [
+                "*"
+            ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:GetRole",
+                "iam:PassRole"
+            ],
+            "Resource": "arn:aws:iam::*:role/PersonalizeS3Role-*"
+        }
+    ]
+}
