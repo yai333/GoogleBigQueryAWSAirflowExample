@@ -36,15 +36,20 @@ CAMPAIGN_NAME = "DEMO-popularity-campaign"
 pre_utc_date = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
 OUTPUT_FILE_KEY = f"session-events/dt={pre_utc_date}/events.csv"
 OUTPUT_PATH = f"s3://{BUCKET_NAME}/{OUTPUT_FILE_KEY}"
+PERSONALIZE_ROLE_NAME = "PersonalizeS3Role"
 iam = boto3.client("iam")
 personalize = boto3.client('personalize')
 
 BQ_SQL = """
 SELECT  REGEXP_EXTRACT(USER_ID, r'(\d+)\.') AS USER_ID, UNIX_SECONDS(EVENT_DATE) AS TIMESTAMP, REGEXP_EXTRACT(page_location,r'product/([^?&#]*)') as ITEM_ID, LOCATION, DEVICE, EVENT_NAME AS EVENT_TYPE
 FROM
-(SELECT user_pseudo_id AS USER_ID, (SELECT value.string_value FROM UNNEST(event_params) WHERE key = "page_location") as page_location, TIMESTAMP_TRUNC(TIMESTAMP_MICROS(event_timestamp) , MINUTE) AS EVENT_DATE, device.category AS DEVICE, geo.country AS LOCATION, event_name AS EVENT_NAME FROM `lively-metrics-295911.analytics_254171871.events_intraday_*`
-  WHERE
-  _TABLE_SUFFIX = FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+(
+    SELECT user_pseudo_id AS USER_ID, (SELECT value.string_value FROM UNNEST(event_params) 
+    WHERE key = "page_location") as page_location, TIMESTAMP_TRUNC(TIMESTAMP_MICROS(event_timestamp), 
+    MINUTE) AS EVENT_DATE, device.category AS DEVICE, geo.country AS LOCATION, event_name AS EVENT_NAME 
+    FROM `lively-metrics-295911.analytics_254171871.events_intraday_*`
+    WHERE
+    _TABLE_SUFFIX = FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
 )
 WHERE  page_location LIKE '%/product/%'
 GROUP BY USER_ID, EVENT_DATE, page_location, LOCATION, DEVICE,EVENT_NAME
@@ -123,7 +128,7 @@ def check_dataset_group(**kwargs):
     else:
         kwargs['ti'].xcom_push(key="dataset_group_arn",
                                value=demo_dg["datasetGroupArn"])
-        return "create_impot_dataset_job"
+        return "skip_init_personalize"
 
 
 def create_schema():
@@ -204,7 +209,6 @@ def put_bucket_policies():
 
 
 def create_iam_role(**kwargs):
-    role_name = f"PersonalizeS3Role-{suffix}"
     assume_role_policy_document = {
         "Version": "2012-10-17",
         "Statement": [
@@ -219,12 +223,12 @@ def create_iam_role(**kwargs):
     }
     try:
         create_role_response = iam.create_role(
-            RoleName=role_name,
+            RoleName=PERSONALIZE_ROLE_NAME,
             AssumeRolePolicyDocument=json.dumps(assume_role_policy_document)
         )
 
         iam.attach_role_policy(
-            RoleName=role_name,
+            RoleName=PERSONALIZE_ROLE_NAME,
             PolicyArn="arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
         )
 
@@ -235,7 +239,8 @@ def create_iam_role(**kwargs):
         return role_arn
     except ClientError as e:
         if e.response['Error']['Code'] == 'EntityAlreadyExists':
-            role_arn = iam.get_role(RoleName=role_name)['Role']['Arn']
+            role_arn = iam.get_role(RoleName=PERSONALIZE_ROLE_NAME)[
+                'Role']['Arn']
             time.sleep(30)
             return role_arn
         else:
@@ -245,7 +250,6 @@ def create_iam_role(**kwargs):
 def create_dataset_type(**kwargs):
     ti = kwargs['ti']
     schema_arn = ti.xcom_pull(key="return_value", task_ids='create_schema')
-    print(schema_arn)
     dataset_group_arn = ti.xcom_pull(key="dataset_group_arn",
                                      task_ids='create_dataset_group')
     dataset_type = "INTERACTIONS"
@@ -267,6 +271,12 @@ def import_dataset(**kwargs):
                                             task_ids='create_dataset_type')
     role_arn = ti.xcom_pull(key="return_value",
                             task_ids='create_iam_role')
+
+    if not role_arn:
+        role_arn = iam.get_role(RoleName=PERSONALIZE_ROLE_NAME)[
+            'Role']['Arn']
+        time.sleep(30)
+
     create_dataset_import_job_response = personalize.create_dataset_import_job(
         jobName="DEMO-dataset-import-job-"+suffix,
         datasetArn=interactions_dataset_arn,
@@ -362,19 +372,19 @@ def update_solution(**kwargs):
             f"Solution version create failed")
 
 
-def update_campagin(**kwargs):
+def update_campaign(**kwargs):
     ti = kwargs['ti']
     solution_version_arn = ti.xcom_pull(key="return_value",
                                         task_ids='update_solution')
     solution_arn = ti.xcom_pull(key="solution_arn",
                                 task_ids='update_solution')
 
-    list_campagins_response = personalize.list_campaigns(
+    list_campaigns_response = personalize.list_campaigns(
         solutionArn=solution_arn,
         maxResults=100
     )
 
-    demo_campaign = next((campaign for campaign in list_campagins_response["campaigns"]
+    demo_campaign = next((campaign for campaign in list_campaigns_response["campaigns"]
                           if campaign["name"] == CAMPAIGN_NAME), False)
     if not demo_campaign:
         create_campaign_response = personalize.create_campaign(
@@ -428,8 +438,9 @@ default_args = {
 dag = DAG(
     'ml-pipeline',
     default_args=default_args,
+    concurrency=1,
     description='A simple ML data pipeline DAG',
-    schedule_interval=timedelta(days=1),
+    schedule_interval='@daily',
 )
 
 t_export_bq_to_s3 = PythonOperator(task_id='export_bq_to_s3',
@@ -532,10 +543,10 @@ t_update_solution = PythonOperator(
     dag=dag,
 )
 
-t_update_campagin = PythonOperator(
-    task_id='update_campagin',
+t_update_campaign = PythonOperator(
+    task_id='update_campaign',
     provide_context=True,
-    python_callable=update_campagin,
+    python_callable=update_campaign,
     trigger_rule=TriggerRule.ALL_SUCCESS,
     retries=1,
     dag=dag,
@@ -552,4 +563,4 @@ t_init_personalize >> [
 ] >> t_create_dataset_type
 t_create_dataset_type >> t_init_personalize_done
 t_init_personalize_done >> t_create_import_dataset_job >> t_update_solution
-t_update_solution >> t_update_campagin
+t_update_solution >> t_update_campaign
