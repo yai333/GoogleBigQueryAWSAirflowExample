@@ -1,6 +1,6 @@
 # Machine Learning workflow with AWS Managed Apache Airflow and Google Big Query
 
-This repository contains the assets for the Google Big Query and Apache Airflow integration sample described in this [blog post](https://#).
+This repository contains the assets for the Google Big Query and Apache Airflow integration sample described in this [blog post](https://yia333.medium.com/creating-a-machine-learning-workflow-using-google-bigquery-and-amazon-managed-apache-airflow-1596b1a0375e).
 
 ## Overview
 
@@ -23,4 +23,4 @@ $aws iam put-role-policy --role-name AmazonMWAA-MyAirflowEnvironment-em53Wv --po
 
 ```
 
-More details can be found at this [blog post](https://#).
+More details can be found at this [blog post](https://yia333.medium.com/creating-a-machine-learning-workflow-using-google-bigquery-and-amazon-managed-apache-airflow-1596b1a0375e).
