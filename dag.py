@@ -31,6 +31,7 @@ GLUE_DATABASE_NAME = "google_analytics"
 TABLE_NAME = "session_events"
 DATASET_GROUP_NAME = f"DEMO-personalise"
 INTERCATION_SCHEMA_NAME = f"DEMO-interaction-schema-{suffix}"
+INTERACTION_DATASET_NAME = "DEMO-metadata-dataset-interactions"
 SOLUTION_NAME = "DEMO-popularity-count"
 CAMPAIGN_NAME = "DEMO-popularity-campaign"
 pre_utc_date = (datetime.utcnow() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -257,7 +258,7 @@ def create_dataset_type(**kwargs):
         datasetType=dataset_type,
         datasetGroupArn=dataset_group_arn,
         schemaArn=schema_arn,
-        name=f"DEMO-metadata-dataset-interactions-{suffix}"
+        name=INTERACTION_DATASET_NAME
     )
 
     interactions_dataset_arn = create_dataset_response['datasetArn']
@@ -271,6 +272,19 @@ def import_dataset(**kwargs):
                                             task_ids='create_dataset_type')
     role_arn = ti.xcom_pull(key="return_value",
                             task_ids='create_iam_role')
+
+    if not interactions_dataset_arn:
+        dataset_group_arn = ti.xcom_pull(key="dataset_group_arn",
+                                         task_ids='check_dataset_group')
+
+        list_datasets_response = personalize.list_datasets(
+            datasetGroupArn=dataset_group_arn,
+            maxResults=100
+        )
+        interaction_dataset = next((dataset for dataset in list_datasets_response["datasets"]
+                                    if dataset["name"] == INTERACTION_DATASET_NAME), False)
+
+        interactions_dataset_arn = interaction_dataset["datasetArn"]
 
     if not role_arn:
         role_arn = iam.get_role(RoleName=PERSONALIZE_ROLE_NAME)[
