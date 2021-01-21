@@ -334,8 +334,13 @@ def import_dataset(**kwargs):
 def update_solution(**kwargs):
     recipe_arn = "arn:aws:personalize:::recipe/aws-popularity-count"
     ti = kwargs['ti']
+
     dataset_group_arn = ti.xcom_pull(key="dataset_group_arn",
-                                     task_ids='create_dataset_group')
+                                     task_ids='check_dataset_group')
+    if not dataset_group_arn:
+        dataset_group_arn = ti.xcom_pull(key="dataset_group_arn",
+                                         task_ids='create_dataset_group')
+
     list_solutions_response = personalize.list_solutions(
         datasetGroupArn=dataset_group_arn,
         maxResults=100
